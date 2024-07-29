@@ -2,6 +2,7 @@ import asyncio
 import os
 import websockets
 
+print("STARTED")
 async def handle_message(websocket, path):
     async for message in websocket:
         print(f"Received message: {message}")
