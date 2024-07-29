@@ -16,7 +16,7 @@ async def start_server():
     logger.info(f"Starting server on port 9000")
     try:
         server = await websockets.serve(handle_message, "0.0.0.0", 9000)
-        logger.info(f"Server started on ws://0.0.0.0:9000}")
+        logger.info(f"Server started on ws://0.0.0.0:9000")
         await server.wait_closed()
     except Exception as e:
         logger.error(f"Failed to start server: {e}", exc_info=True)
