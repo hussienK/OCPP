@@ -439,7 +439,7 @@ async def main():
 	global loop
 	loop = asyncio.get_event_loop()
 	create_logger()
-
+	
 	# Start the WebSocket server
 	server = await websockets.serve(
 		on_connect,
