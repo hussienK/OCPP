@@ -425,7 +425,7 @@ async def on_connect(websocket, path):
 
 async def	run_flask():
 	config = Config()
-	config.bind = ["localhost:5000"]
+	config.bind = ["0.0.0.0:5000"]
 	await serve(app, config)
 
 def run_async_task(coro):
@@ -443,7 +443,7 @@ async def main():
 	# Start the WebSocket server
 	server = await websockets.serve(
 		on_connect,
-		'localhost',
+		'0.0.0.0',
 		9000,
 		subprotocols=['ocpp1.6']
 	)
