@@ -14,14 +14,13 @@ import asyncio
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
 import websockets
-from flask import Flask, request, jsonify
+import json
 
 #import the db
 DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
 DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
 supabase: Client = create_client(DB_URL, DB_API)
 
-app = Flask(__name__)
 connected_charge_points = {}
 
 class MyChargePoint(cp):
@@ -45,9 +44,8 @@ class MyChargePoint(cp):
 		-TODO: error handling
 	"""
 	@on(Action.BootNotification)
-	async def on_boot_notification(self, charge_point_vendor, charge_point_model, **kwargs):
-		logging.info("BootNotification received: Vendor=%s, Model=%s\n\n", charge_point_vendor, charge_point_model)
-		print_spaced(kwargs)
+	async def on_boot_notification(self, **kwargs):
+		logging.info("BootNotification received: Vendor=%s, Model=%s\n\n", kwargs['charge_point_vendor'], kwargs['charge_point_model'])
 		return call_result.BootNotification(
 			current_time=datetime.now().isoformat(),
 			interval=60,
@@ -344,16 +342,13 @@ async def send_remote_stop_transaction(cp, transaction_id):
 	response = await cp.call(request)
 	return response
 
-@app.route('/start_charging', methods=['POST'])
-def start_charging():
-	data = request.json
-	print_spaced(data)
-	charge_point_id = data.get('charge_point_id')
-	id_tag = data.get('id_tag')
-	amount_kwh = data.get('amount_kwh')
+async def start_remote_transaction(data):
+	charge_point_id = data['data'].get('charge_point_id')
+	id_tag = data['data'].get('id_tag')
+	amount_kwh = data['data'].get('amount_kwh')
 
 	if not charge_point_id or not id_tag:
-		return jsonify({'error': 'Missing charge_point_id or id_tag'}), 400
+		return json.dumps({'error': 'Missing charge_point_id or id_tag'})
 
 	if charge_point_id in connected_charge_points:
 		cp = connected_charge_points[charge_point_id]
@@ -367,79 +362,72 @@ def start_charging():
 			else:
 				connector_id = 1
 
-			response = run_async_task(send_remote_start_transaction(cp, id_tag, connector_id, amount_kwh))
+			response = await send_remote_start_transaction(cp, id_tag, connector_id, amount_kwh)
 		except Exception as e:
-			return jsonify({'error': str(e)}), 500
+			return json.dumps({'error': str(e)})
 
 		response_dict = {
 			'status': response.status if response else 'unknown',
 			'message': 'Remote start transaction initiated' if response else 'Failed to initiate transaction'
 		}
-		return jsonify(response_dict)
+		return json.dumps(response_dict)
 	else:
-		return jsonify({'error': 'Charge point not connected'}), 400
+		return json.dumps({'error': 'Charge point not connected'})
 
-
-@app.route('/stop_charging', methods=['POST'])
-def stop_charging():
-	data = request.json
-	charge_point_id = data.get('charge_point_id')
-	transaction_id = data.get('transaction_id')
+async def stop_remote_transaction(data):
+	charge_point_id = data['data'].get('charge_point_id')
+	transaction_id = data['data'].get('transaction_id')
 
 	if not charge_point_id or not transaction_id:
-		return jsonify({'error': 'Missing charge_point_id or transaction_id'}), 400
+		return json.dumps({'error': 'Missing charge_point_id or transaction_id'})
 
 	if charge_point_id in connected_charge_points:
 		cp = connected_charge_points[charge_point_id]
 		response = None
 		try:
-			response = run_async_task(send_remote_stop_transaction(cp, transaction_id))
+			response = await (send_remote_stop_transaction(cp, transaction_id))
 		except Exception as e:
-			return jsonify({'error': str(e)}), 500
+			return json.dumps({'error': str(e)})
 
 		response_dict = {
 			'status': response.status if response else 'unknown',
 			'message': 'Remote stop transaction initiated' if response else 'Failed to initiate transaction'
 		}
-		return jsonify(response_dict)
+		return json.dumps(response_dict)
 	else:
-		return jsonify({'error': 'Charge point not connected'}), 400
-
+		return json.dumps({'error': 'Charge point not connected'})
 
 async def on_connect(websocket, path):
 	""" For every new charge point that connects, create a ChargePoint instance
 	and start listening for messages.
 	"""
-
 	charge_point_id = path.strip('/')
-	cp = MyChargePoint(charge_point_id, websocket)
-	connected_charge_points[charge_point_id] = cp
-	logging.info("New connection established: %s", charge_point_id)
-
-	try:
-		await cp.start()
-	except websockets.exceptions.ConnectionClosedError as e:
-		logging.error("Connection closed with error: %s", e)
-	finally:
-		await cp.on_disconnect(websocket)
-
-async def	run_flask():
-	config = Config()
-	config.bind = ["0.0.0.0:5000"]
-	await serve(app, config)
-
-def run_async_task(coro):
-	global loop
-	return asyncio.run_coroutine_threadsafe(coro, loop).result()
-
-
-loop = None
+	if not charge_point_id.startswith("CP"):
+		try:
+			message = await websocket.recv()
+			data = json.loads(message)
+			if (data['action'] == 'start_charging'):
+				response = await(start_remote_transaction(data))
+				await websocket.send(json.dumps(response))
+			elif (data['action'] == 'stop_charging'):
+				response = await(stop_remote_transaction(data))
+				await websocket.send(json.dumps(response))
+		except Exception as e:
+			print(f"Error in connection: {e}")
+	else:
+		cp = MyChargePoint(charge_point_id, websocket)
+		connected_charge_points[charge_point_id] = cp
+		logging.info("New connection established: %s", charge_point_id)
+		try:
+			await cp.start()
+		except websockets.exceptions.ConnectionClosedError as e:
+			logging.error("Connection closed with error: %s", e)
+		finally:
+			await cp.on_disconnect(websocket)
 
 async def main():
-	global loop
-	loop = asyncio.get_event_loop()
 	create_logger()
-	
+
 	# Start the WebSocket server
 	server = await websockets.serve(
 		on_connect,
@@ -449,10 +437,7 @@ async def main():
 	)
 
 	try:
-		await asyncio.gather(
-			server.wait_closed(),
-			run_flask()
-		)
+		await server.wait_closed(),
 	except asyncio.CancelledError:
 		print("Server is shutting down...")
 		server.close()
