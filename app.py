@@ -128,7 +128,7 @@ class MyChargePoint(cp):
 		point_data, user_data = self.get_charge_point_and_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
-		if not point_data or kwargs['id_tag'] not in self.authorized_users or point_data[0]['status'] != 'Available':
+		if not point_data or kwargs['id_tag'] not in self.authorized_users or point_data['status'] != 'Available':
 			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
 		
 		#check for transaction if it's already active and return current transaction code
