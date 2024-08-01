@@ -191,7 +191,7 @@ class MyChargePoint(cp):
 				'charge_point_id': charge_point_id,
 				'start_time': datetime.now().isoformat(),
 			}]).execute()
-		return session_data[0]['id']
+		return session_data.data[0]['id']
 	
 	#updates the table by creating a new transaction with random generated transactio key
 	def create_new_transaction(self, session_id):
