@@ -144,7 +144,7 @@ class MyChargePoint(cp):
 	#get the information about the user and the charge_points
 	def	get_charge_point_and_user_data(self, connector_id, id_tag):
 		query_result_point = supabase.table('charge_points').select('id', 'status', 'meter_reading').eq('id', connector_id).execute()
-		query_result_users = supabase.table('users').select('id').eq('id_tag', kwargs['id_tag']).execute()
+		query_result_users = supabase.table('users').select('id').eq('id_tag', id_tag).execute()
 		return query_result_point.data[0], query_result_users.data[0]
 
 	#returns a response for transaction start with required data
