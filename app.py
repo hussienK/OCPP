@@ -15,10 +15,16 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config
 import websockets
 import json
+import os
 
 #import the db
-DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
-DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
+DB_URL = os.getenv("DB_URL")
+DB_API = os.getenv("DB_API")
+PORT = int(os.getenv("PORT"))
+if (DB_API is None or DB_URL is None or PORT is None):
+	print("Error in retrieving in enviroment variables")
+	exit(1)
+
 supabase: Client = create_client(DB_URL, DB_API)
 
 connected_charge_points = {}
@@ -432,7 +438,7 @@ async def main():
 	server = await websockets.serve(
 		on_connect,
 		'0.0.0.0',
-		9000,
+		PORT,
 		subprotocols=['ocpp1.6']
 	)
 
