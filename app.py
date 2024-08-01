@@ -47,6 +47,10 @@ class MyChargePoint(cp):
 		self.target_kwh = -1
 		self.charged_kwh = 0
 
+
+
+
+
 	"""
 		BootNotifcation handler
 		-sets the interval of heartbeats
@@ -60,6 +64,10 @@ class MyChargePoint(cp):
 			interval=60,
 			status=RegistrationStatus.accepted
 		)
+	
+
+
+
 
 	"""
 		Send a heartbeat to check of server still connected
@@ -68,6 +76,10 @@ class MyChargePoint(cp):
 	async def on_heartbeat(self, **kwargs):
 		logging.info("Heartbeat recieved")
 		return call_result.Heartbeat(current_time = datetime.now().isoformat())
+	
+
+
+
 
 	"""
 		checks if the user is authorized
@@ -97,12 +109,15 @@ class MyChargePoint(cp):
 	#get data of current user from database
 	def	get_user_data(self, id_tag):
 		query_result = supabase.table('users').select('id', 'expiry_date').eq('id_tag', id_tag).execute()
-		return query_result.data[0] if query_result.data else None
+		return query_result.data[0]
 
 	#remove the expired users from data and their related transaction
 	def	remove_expired_user(self, id_tag):
 		self.authorized_users.discard(id_tag)
 		self.transactions_users.discard(id_tag)
+
+
+
 
 	"""
 		Does the start transaction
@@ -186,6 +201,10 @@ class MyChargePoint(cp):
 				'session_id': session_id,
 			}]).execute()
 		return transaction_id
+
+
+
+
 
 	async def	close_transaction(self, transaction_id, id_tag, meter_stop):
 		#gets new meter reading
