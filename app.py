@@ -23,6 +23,9 @@ from logger import create_logger
 DB_URL = os.getenv("DB_URL")
 DB_API = os.getenv("DB_API")
 PORT = int(os.getenv("PORT"))
+# DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
+# DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
+# PORT = 9000
 if (DB_API is None or DB_URL is None or PORT is None):
 	print("Error in retrieving in enviroment variables")
 	exit(1)
@@ -207,6 +210,88 @@ class MyChargePoint(cp):
 
 
 
+
+	"""
+		Does the stopping of transactions, updates the database with info
+	"""
+	@on(Action.StopTransaction)
+	async def	on_stop_transaction(self, **kwargs):
+
+		#check if user does have an ongoing transactions
+		if (kwargs['id_tag'] not in self.transactions_users):
+			#returns accepted status
+			return self.stop_transaction_responce( AuthorizationStatus.invalid)
+
+		#close transaction and update the meter
+		self.transactions_users.remove(kwargs['id_tag'])
+		await self.close_transaction(kwargs['transaction_id'], kwargs['id_tag'], kwargs['meter_stop'])
+		self.update_charge_point_meter(kwargs['meter_stop'], kwargs['charge_point'])
+		return self.stop_transaction_responce(AuthorizationStatus.accepted)
+	
+	def stop_transaction_responce(self, status):		
+		return call_result.StopTransaction({'status': status})
+
+
+
+
+
+
+	"""
+		sends a status notification to update database with status of current chargepoint
+	"""
+	@on(Action.StatusNotification)
+	async def on_status_notification(self, **kwargs):
+		#update the table
+		supabase.table('charge_points').update({'status': kwargs['status']}).eq('id', kwargs['connector_id']).execute()
+		#return response
+		return call_result.StatusNotification()
+
+
+
+
+	"""
+		sends meter data from client to udpate database
+	"""
+	@on(Action.MeterValues)
+	async def on_meter_values(self, **kwargs):
+		#get data and calculate
+		meter_value = kwargs['meter_value'][0]['sampled_value'][0]['value']
+		self.charged_kwh = (int(meter_value) - self.meter_start) / 1000
+
+		transaction = supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data
+		sessions = supabase.table('sessions').select('id', 'charge_point_id').eq('id', transaction[0]['session_id']).execute().data
+		supabase.table('charge_points').update({'meter_reading': meter_value}).eq('id', sessions[0]['charge_point_id']).execute()
+
+		#if there is a limit to charging
+		if self.target_kwh != -1 and self.charged_kwh >= self.target_kwh:
+			await self.on_stop_transaction_meter(**kwargs)
+
+		return call_result.MeterValues()
+	
+
+
+
+	"""
+		Extra stuff
+	"""
+
+	#when a client disconnects
+	async def on_disconnect(self, websocket):
+		#remove current ChargePoint instance
+		if (self.id in connected_charge_points):
+			del connected_charge_points[self.id]
+		logging.info("ChargePoint %s disconnected", self.id)
+
+		#if there is an active transaction, loop through each transactions and close it
+		if (len(self.transactions_users) != 0):
+			for t in self.transactions_users:
+				sessions = supabase.table('sessions').select('id', 'user_id', 'charge_point_id', 'end_time').is_('end_time', None).eq('user_id',
+			 			supabase.table('users').select('id', 'id_tag').eq('id_tag', t).execute().data[0]['id']).execute().data
+				charge_point = supabase.table('charge_points').select('id', 'meter_reading').eq('id', sessions[0]['charge_point_id']).execute().data
+				transaction = supabase.table('transactions').select('id', 'session_id').eq('session_id', sessions[0]['id']).execute().data
+				await self.close_transaction(transaction[0]['id'], t, charge_point[0]['meter_reading'])
+
+	#closes a transaction
 	async def	close_transaction(self, transaction_id, id_tag, meter_stop):
 		#gets new meter reading
 		meter_now = meter_stop
@@ -220,130 +305,24 @@ class MyChargePoint(cp):
 
 		#update the sessions, and transactions db
 		meter_amount = meter_now - self.meter_start
-		supabase.table('sessions').update(
-			{
-				'energy_consumed': meter_amount,
-				'end_time': datetime.now().isoformat(),
-			}
-		).eq('id', trancsac_data[0]['session_id']).execute()
-		supabase.table('transactions').update(
-			{
-				'amount': meter_amount * self.price_per_kwh,
-				'timestamp': datetime.now().isoformat(),
-			}
-		).eq('id', transaction_id).execute()
+		supabase.table('sessions').update({'energy_consumed': meter_amount, 'end_time': datetime.now().isoformat()}).eq('id', trancsac_data[0]['session_id']).execute()
+		supabase.table('transactions').update({'amount': meter_amount * self.price_per_kwh, 'timestamp': datetime.now().isoformat()}).eq('id', transaction_id).execute()
 
-	"""
-		Does the stopping of transactions, updates the database
-	"""
-	@on(Action.StopTransaction)
-	async def	on_stop_transaction(self, **kwargs):
-
-		#check if user does have an ongoing transactions
-		if not (kwargs['id_tag'] in self.transactions_users):
-			#returns accepted status
-			return call_result.StopTransaction(
-				{
-					'status': AuthorizationStatus.invalid,
-				}
-			)
-
-		self.transactions_users.remove(kwargs['id_tag'])
-		await self.close_transaction(kwargs['transaction_id'], kwargs['id_tag'], kwargs['meter_stop'])
-		session = supabase.table('sessions').select('charge_point_id', "id").eq('id',
-				supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data[0]['session_id']).execute()
-		supabase.table('charge_points').update(
-			{
-				'meter_reading': kwargs['meter_stop']
-			}
-		).eq('id',session.data[0]['charge_point_id']).execute()
-		#returns accepted status
-		return call_result.StopTransaction(
-			{
-				'status': AuthorizationStatus.accepted,
-			}
-		)
-	
+	#when stopping a transaction because charging is now full
 	async def	on_stop_transaction_meter(self, **kwargs):
-
+		#query for required data
 		session = supabase.table('sessions').select('user_id', 'charge_point_id', "id").eq('id',
 				supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data[0]['session_id']).execute().data
 		id_tag = supabase.table('users').select('id', 'id_tag').eq('id', session[0]['user_id']).execute().data[0]['id_tag']
 		#check if user does have an ongoing transactions
 		if not (id_tag in self.transactions_users):
 			#returns accepted status
-			return call_result.StopTransaction(
-				{
-					'status': AuthorizationStatus.invalid,
-				}
-			)
+			return call_result.StopTransaction({'status': AuthorizationStatus.invalid})
 		self.transactions_users.remove(id_tag)
 		await self.close_transaction(kwargs['transaction_id'], id_tag, int(kwargs['meter_value'][0]['sampled_value'][0]['value']))
 		#returns accepted status
-		return call_result.StopTransaction(
-			{
-				'status': AuthorizationStatus.accepted,
-			}
-		)
+		return call_result.StopTransaction({'status': AuthorizationStatus.accepted})
 
-
-	@on(Action.MeterValues)
-	async def on_meter_values(self, **kwargs):
-		meter_value = kwargs['meter_value'][0]['sampled_value'][0]['value']
-		self.charged_kwh = (int(meter_value) - self.meter_start) / 1000
-
-		transaction = supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data
-		sessions = supabase.table('sessions').select('id', 'charge_point_id').eq('id', transaction[0]['session_id']).execute().data
-		supabase.table('charge_points').update(
-			{
-				'meter_reading': meter_value
-			}
-		).eq('id', sessions[0]['charge_point_id']).execute()
-
-		print_spaced(self.charged_kwh)
-		print_spaced(self.target_kwh)
-		print_spaced(kwargs)
-		if self.target_kwh != -1 and self.charged_kwh >= self.target_kwh:
-			await self.on_stop_transaction_meter(**kwargs)
-		return call_result.MeterValues(
-		)
-
-	"""
-		-TODO: update based on given status
-	"""
-	@on(Action.StatusNotification)
-	async def on_status_notification(self, **kwargs):
-		supabase.table('charge_points').update(
-			{
-				'status': kwargs['status'],
-			}
-		).eq('id', kwargs['connector_id']).execute()
-		return call_result.StatusNotification(
-		)
-
-	async def on_disconnect(self, websocket):
-		if (self.id in connected_charge_points):
-			del connected_charge_points[self.id]
-		logging.info("ChargePoint %s disconnected", self.id)
-		if (len(self.transactions_users) != 0):
-			for t in self.transactions_users:
-				sessions = supabase.table('sessions').select('id', 'user_id', 'charge_point_id', 'end_time').is_('end_time', None).eq('user_id',
-			 			supabase.table('users').select('id', 'id_tag').eq('id_tag', t).execute().data[0]['id']).execute().data
-				charge_point = supabase.table('charge_points').select('id', 'meter_reading').eq('id', sessions[0]['charge_point_id']).execute().data
-				transaction = supabase.table('transactions').select('id', 'session_id').eq('session_id', sessions[0]['id']).execute().data
-				await self.close_transaction(transaction[0]['id'], t, charge_point[0]['meter_reading'])
-
-async def stop_charging(self, transaction_id):
-    await self.close_transaction(transaction_id, self.id_tag, self.charged_kwh * 1000)  # Convert kWh to Wh for meter stop value
-    session = supabase.table('sessions').select('charge_point_id', "id").eq('id', 
-            supabase.table('transactions').select('id', 'session_id').eq('id', transaction_id).execute().data[0]['session_id']).execute()
-    supabase.table('charge_points').update(
-        {
-            'meter_reading': self.charged_kwh * 1000  # Convert kWh to Wh
-        }
-    ).eq('id', session.data[0]['charge_point_id']).execute()
-
-    await send_remote_stop_transaction(self, transaction_id)
 
 async def send_remote_start_transaction(cp, id_tag, connector_id=1, amount_kwh=0):
 	request = call.RemoteStartTransaction(
