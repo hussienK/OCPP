@@ -1,7 +1,7 @@
 from datetime import datetime
-from logger import create_logger
+import json
+import os
 import logging
-from utils import *
 
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cp
@@ -14,10 +14,12 @@ import asyncio
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
 import websockets
-import json
-import os
 
-#import the db
+from utils import *
+from logger import create_logger
+
+
+#load env variables
 DB_URL = os.getenv("DB_URL")
 DB_API = os.getenv("DB_API")
 PORT = int(os.getenv("PORT"))
@@ -25,8 +27,10 @@ if (DB_API is None or DB_URL is None or PORT is None):
 	print("Error in retrieving in enviroment variables")
 	exit(1)
 
+#load the database
 supabase: Client = create_client(DB_URL, DB_API)
 
+#store all the connected charge points
 connected_charge_points = {}
 
 class MyChargePoint(cp):
@@ -41,13 +45,12 @@ class MyChargePoint(cp):
 		self.price_per_kwh = 0.15
 		self.meter_start = 0
 		self.target_kwh = -1
-		self.chraged_kwh = 0
+		self.charged_kwh = 0
 
 	"""
 		BootNotifcation handler
 		-sets the interval of heartbeats
-		-TODO: save to db the booted device
-		-TODO: error handling
+		-sets the boot start time
 	"""
 	@on(Action.BootNotification)
 	async def on_boot_notification(self, **kwargs):
@@ -64,126 +67,125 @@ class MyChargePoint(cp):
 	@on(Action.Heartbeat)
 	async def on_heartbeat(self, **kwargs):
 		logging.info("Heartbeat recieved")
-		return call_result.Heartbeat(
-			   current_time = datetime.now().isoformat()
-		)
+		return call_result.Heartbeat(current_time = datetime.now().isoformat())
 
 	"""
 		checks if the user is authorized
+		-checks in list of authorized users and also compares dates to determine
 	"""
 	@on(Action.Authorize)
 	async def on_authorize(self, **kwargs):
 		#get data of user with current token from database
 		id_token = kwargs.get('id_tag', 'NULL')
-		query_result = supabase.table('users').select('id', 'expiry_date').eq('id_tag', id_token).execute()
-		user_data = query_result.data
+		user_data = self.get_user_data(id_token)
 
 		if user_data and not(id_token in self.transactions_users):
 			#if token haven't expired
 			if (datetime.now() < datetime.fromisoformat(user_data[0]['expiry_date'])):
 				self.authorized_users.add(id_token) #add the user to list of authenticated for quicker access
-				id_token_info = {
-					'status': AuthorizationStatus.accepted,
-					'expiryDate': datetime.now().isoformat()
-				}
+				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now().isoformat()}
 			#exists but expired
 			else:
-				if id_token in self.authorized_users: #remove user from authentication if expired
-					self.authorized_users.remove(id_token)
-				if id_token in self.transactions_users: #remove user from transactions if expired
-					self.transactions_users.remove(id_token)
-				id_token_info = {
-				'status': AuthorizationStatus.expired,
-				}
+				self.remove_expired_user(id_token)
+				id_token_info = {'status': AuthorizationStatus.expired}
 		#doesn't exist
 		else:
-			id_token_info = {
-			'status': AuthorizationStatus.invalid,
-			}
-
+			id_token_info = {'status': AuthorizationStatus.invalid}
 		#return the required info
-		return call_result.Authorize(
-			id_tag_info=id_token_info
-		)
+		return call_result.Authorize(id_tag_info=id_token_info)
+
+	#get data of current user from database
+	def	get_user_data(self, id_tag):
+		query_result = supabase.table('users').select('id', 'expiry_date').eq('id_tag', id_tag).execute()
+		return query_result.data[0] if query_result.data else None
+
+	#remove the expired users from data and their related transaction
+	def	remove_expired_user(self, id_tag):
+		self.authorized_users.discard(id_tag)
+		self.transactions_users.discard(id_tag)
 
 	"""
 		Does the start transaction
-		-TODO: handle some edge cases, don't start if already started etc...
 	"""
 	@on(Action.StartTransaction)
 	async def on_start_transaction(self, **kwargs):
 		connector_id = kwargs['connector_id']
-
-		#get the information about the user and the charge_points
-		query_result = supabase.table('charge_points').select('id', 'status', 'meter_reading').eq('id', connector_id).execute()
-		query_result_users = supabase.table('users').select('id').eq('id_tag', kwargs['id_tag']).execute()
-		point_data = query_result.data
-		user_data = query_result_users.data
+		point_data, user_data = self.get_charge_point_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
-		if (len(point_data) == 0 or kwargs['id_tag'] not in self.authorized_users
-	  			or point_data[0]['status'] != 'Available'):
-			return call_result.StartTransaction(
-				transaction_id= 0,
-				id_tag_info={
-					'status': AuthorizationStatus.blocked,
-				}
-			)
+		if not point_data or kwargs['id_tag'] not in self.authorized_users or point_data[0]['status'] != 'Available':
+			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
+		
 		#check for transaction if it's already active and return current transaction code
 		if kwargs['id_tag'] in self.transactions_users:
-			sessions = supabase.table('sessions').select('id', 'user_id', 'end_time').is_('end_time', None).eq('user_id',
-			 								supabase.table('users').select('id', 'id_tag').eq('id_tag', kwargs['id_tag']).execute().data[0]['id']).execute().data
-			transactions = supabase.table('transactions').select('id', 'session_id').eq('session_id', sessions[0]['id']).execute().data
-			return call_result.StartTransaction(
-				transaction_id= transactions[0]['id'],
-				id_tag_info={
-					'status': AuthorizationStatus.concurrent_tx,
-				}
+			return self.concurrent_transaction_responce(kwargs['id_tag'])
+
+		#starts the whole transaction process
+		transaction_id = self.start_new_transaction(kwargs, user_data, point_data)
+
+		#returns the expected result
+		return self.start_transaction_responce(transaction_id, AuthorizationStatus.accepted)
+
+	#get the information about the user and the charge_points
+	def	get_charge_point_and_user_data(self, connector_id, id_tag):
+		query_result_point = supabase.table('charge_points').select('id', 'status', 'meter_reading').eq('id', connector_id).execute()
+		query_result_users = supabase.table('users').select('id').eq('id_tag', kwargs['id_tag']).execute()
+		return query_result_point.data[0], query_result_users.data[0]
+
+	#returns a response for transaction start with required data
+	def	start_transaction_responce(self, transaction_id, status):
+		return call_result.StartTransaction(
+			transaction_id= transaction_id,
+			id_tag_info={'status': AuthorizationStatus.blocked}
 			)
+	
+	#returns a responce for concurrent users
+	def concurrent_transaction_responce(self, id_tag):
+		sessions = supabase.table('sessions').select('id', 'user_id', 'end_time').is_('end_time', None).eq('user_id',
+						supabase.table('users').select('id', 'id_tag').eq('id_tag', id_tag).execute().data[0]['id']).execute().data
+		transactions = supabase.table('transactions').select('id', 'session_id').eq('session_id', sessions[0]['id']).execute().data
+		return call_result.StartTransaction(transaction_id= transactions[0]['id'], id_tag_info={'status': AuthorizationStatus.concurrent_tx})
 
+	#main code for handling a transaction start
+	def start_new_transaction(self, kwargs, user_data, point_data):
+		#add user to operations and update meter in case of sync error
+		self.transactions_users.add(kwargs['id_tag'])
+		self.update_charge_point_meter(kwargs['meter_start', point_data['id']])
+		#creates a new session and transaction
+		session_id = self.create_new_session(user_data['id'], point_data['id'])
+		transaction_id = self.create_new_transaction(session_id)
 
-		amount_kwh = -1
+		#checks if there is a charging_profile which indicates a charging limit
+		self.meter_start = kwargs['meter_start']
 		if hasattr(kwargs, "charging_profile"):
 			amount_kwh = kwargs['charging_profile']['chargingSchedule']['chargingSchedulePeriod'][0]['limit'] / 1000
 			self.target_kwh = amount_kwh
-			self.chraged_kwh = 0
+			self.charged_kwh = 0
+			logging.info("Starting transaction with %s kWh", self.target_kwh)
 
-		if (amount_kwh != -1):
-			logging.info("Starting transaction with %s kWh", amount_kwh)
+		return transaction_id
+	
+	#updates the charge_points meter
+	def update_charge_point_meter(self, meter_start, charge_point_id):
+		supabase.table('charge_points').update({'meter_reading': meter_start,}).eq('id', charge_point_id).execute()
 
-		self.transactions_users.add(kwargs['id_tag'])
-		#updates the table by creating a new session
-		create_table_d = supabase.table('sessions').insert(
-			[{
-				'user_id': user_data[0]['id'],
-				'charge_point_id': point_data[0]['id'],
+	#updates the table by creating a new session
+	def create_new_session(self, user_id, charge_point_id):
+		session_data = supabase.table('sessions').insert([{
+				'user_id': user_id,
+				'charge_point_id': charge_point_id,
 				'start_time': datetime.now().isoformat(),
-			}]
-		).execute()
-		#updates the charge_points meter
-		supabase.table('charge_points').update(
-			{
-				'meter_reading': kwargs['meter_start'],
-			}
-		).eq('id', connector_id).execute()
-		#updates the transaction table by creating a new transaction
-		session_id = create_table_d.data[0]['id']
+			}]).execute()
+		return session_data[0]['id']
+	
+	#updates the table by creating a new transaction with random generated transactio key
+	def create_new_transaction(self, session_id):
 		transaction_id = generate_transaction_id() #generates a random transaction_id
-		supabase.table('transactions').insert(
-			[{
+		supabase.table('transactions').insert([{
 				'id': transaction_id,
 				'session_id': session_id,
-			}]
-		).execute()
-
-		self.meter_start = kwargs['meter_start']
-		#returns the expected result
-		return call_result.StartTransaction(
-				transaction_id= transaction_id,
-				id_tag_info={
-					'status': AuthorizationStatus.accepted,
-				}
-		)
+			}]).execute()
+		return transaction_id
 
 	async def	close_transaction(self, transaction_id, id_tag, meter_stop):
 		#gets new meter reading
@@ -268,7 +270,7 @@ class MyChargePoint(cp):
 	@on(Action.MeterValues)
 	async def on_meter_values(self, **kwargs):
 		meter_value = kwargs['meter_value'][0]['sampled_value'][0]['value']
-		self.chraged_kwh = (int(meter_value) - self.meter_start) / 1000
+		self.charged_kwh = (int(meter_value) - self.meter_start) / 1000
 
 		transaction = supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data
 		sessions = supabase.table('sessions').select('id', 'charge_point_id').eq('id', transaction[0]['session_id']).execute().data
@@ -278,10 +280,10 @@ class MyChargePoint(cp):
 			}
 		).eq('id', sessions[0]['charge_point_id']).execute()
 
-		print_spaced(self.chraged_kwh)
+		print_spaced(self.charged_kwh)
 		print_spaced(self.target_kwh)
 		print_spaced(kwargs)
-		if self.target_kwh != -1 and self.chraged_kwh >= self.target_kwh:
+		if self.target_kwh != -1 and self.charged_kwh >= self.target_kwh:
 			await self.on_stop_transaction_meter(**kwargs)
 		return call_result.MeterValues(
 		)
