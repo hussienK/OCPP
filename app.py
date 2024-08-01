@@ -125,7 +125,7 @@ class MyChargePoint(cp):
 	@on(Action.StartTransaction)
 	async def on_start_transaction(self, **kwargs):
 		connector_id = kwargs['connector_id']
-		point_data, user_data = self.get_charge_point_user_data(connector_id, kwargs['id_tag'])
+		point_data, user_data = self.get_charge_point_and_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
 		if not point_data or kwargs['id_tag'] not in self.authorized_users or point_data[0]['status'] != 'Available':
