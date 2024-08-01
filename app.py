@@ -121,6 +121,7 @@ class MyChargePoint(cp):
 
 	"""
 		Does the start transaction
+		-if there is a charging profile we start the transaction while also indic
 	"""
 	@on(Action.StartTransaction)
 	async def on_start_transaction(self, **kwargs):
@@ -151,7 +152,7 @@ class MyChargePoint(cp):
 	def	start_transaction_responce(self, transaction_id, status):
 		return call_result.StartTransaction(
 			transaction_id= transaction_id,
-			id_tag_info={'status': AuthorizationStatus.blocked}
+			id_tag_info={'status': status}
 			)
 	
 	#returns a responce for concurrent users
