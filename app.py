@@ -165,7 +165,7 @@ class MyChargePoint(cp):
 	def start_new_transaction(self, kwargs, user_data, point_data):
 		#add user to operations and update meter in case of sync error
 		self.transactions_users.add(kwargs['id_tag'])
-		self.update_charge_point_meter(kwargs['meter_start', point_data['id']])
+		self.update_charge_point_meter(kwargs['meter_start'], point_data['id'])
 		#creates a new session and transaction
 		session_id = self.create_new_session(user_data['id'], point_data['id'])
 		transaction_id = self.create_new_transaction(session_id)
