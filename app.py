@@ -93,7 +93,7 @@ class MyChargePoint(cp):
 
 		if user_data and not(id_token in self.transactions_users):
 			#if token haven't expired
-			if (datetime.now() < datetime.fromisoformat(user_data[0]['expiry_date'])):
+			if (datetime.now() < datetime.fromisoformat(user_data['expiry_date'])):
 				self.authorized_users.add(id_token) #add the user to list of authenticated for quicker access
 				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now().isoformat()}
 			#exists but expired
