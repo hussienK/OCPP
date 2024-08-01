@@ -222,7 +222,9 @@ class MyChargePoint(cp):
 		#close transaction and update the meter
 		self.transactions_users.remove(kwargs['id_tag'])
 		await self.close_transaction(kwargs['transaction_id'], kwargs['id_tag'], kwargs['meter_stop'])
-		self.update_charge_point_meter(kwargs['meter_stop'], kwargs['charge_point_id'])
+		session = supabase.table('sessions').select('charge_point_id', "id").eq('id',
+			supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data[0]['session_id']).execute()
+		self.update_charge_point_meter(kwargs['meter_stop'], session.data[0]['charge_point_id'])
 		return self.stop_transaction_responce(AuthorizationStatus.accepted)
 	
 	def stop_transaction_responce(self, status):		
