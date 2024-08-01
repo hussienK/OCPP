@@ -23,9 +23,6 @@ from logger import create_logger
 DB_URL = os.getenv("DB_URL")
 DB_API = os.getenv("DB_API")
 PORT = int(os.getenv("PORT"))
-# DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
-# DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
-# PORT = 9000
 if (DB_API is None or DB_URL is None or PORT is None):
 	print("Error in retrieving in enviroment variables")
 	exit(1)
@@ -324,6 +321,10 @@ class MyChargePoint(cp):
 		return call_result.StopTransaction({'status': AuthorizationStatus.accepted})
 
 
+"""
+	code to send remote requests to the client
+"""
+#sends a request for remote starting a transaction
 async def send_remote_start_transaction(cp, id_tag, connector_id=1, amount_kwh=0):
 	request = call.RemoteStartTransaction(
 		id_tag = id_tag,
@@ -342,13 +343,16 @@ async def send_remote_start_transaction(cp, id_tag, connector_id=1, amount_kwh=0
 	response = await cp.call(request)
 	return response
 
+#denf a remote request for stoping a transaction
 async def send_remote_stop_transaction(cp, transaction_id):
-	request = call.RemoteStopTransaction(
-		transaction_id=transaction_id
-	)
+	request = call.RemoteStopTransaction(transaction_id=transaction_id)
 	response = await cp.call(request)
 	return response
 
+"""
+	manages the requests for remote  transactions
+"""
+#starts the remote transactions
 async def start_remote_transaction(data):
 	charge_point_id = data['data'].get('charge_point_id')
 	id_tag = data['data'].get('id_tag')
@@ -381,6 +385,7 @@ async def start_remote_transaction(data):
 	else:
 		return json.dumps({'error': 'Charge point not connected'})
 
+#stops the remote transactions
 async def stop_remote_transaction(data):
 	charge_point_id = data['data'].get('charge_point_id')
 	transaction_id = data['data'].get('transaction_id')
@@ -404,10 +409,11 @@ async def stop_remote_transaction(data):
 	else:
 		return json.dumps({'error': 'Charge point not connected'})
 
-async def on_connect(websocket, path):
-	""" For every new charge point that connects, create a ChargePoint instance
+""" 
+	For every new charge point that connects, create a ChargePoint instance
 	and start listening for messages.
-	"""
+"""
+async def on_connect(websocket, path):
 	charge_point_id = path.strip('/')
 	if not charge_point_id.startswith("CP"):
 		try:
