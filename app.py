@@ -174,6 +174,7 @@ class MyChargePoint(cp):
 
 		#checks if there is a charging_profile which indicates a charging limit
 		self.meter_start = kwargs['meter_start']
+		self.target_kwh = -1
 		if hasattr(kwargs, "charging_profile"):
 			amount_kwh = kwargs['charging_profile']['chargingSchedule']['chargingSchedulePeriod'][0]['limit'] / 1000
 			self.target_kwh = amount_kwh
