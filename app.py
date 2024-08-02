@@ -24,6 +24,8 @@ from logger import create_logger
 DB_URL = os.getenv("DB_URL")
 DB_API = os.getenv("DB_API")
 PORT = int(os.getenv("PORT"))
+supabase: Client = create_client(DB_URL, DB_API)
+
 if (DB_API is None or DB_URL is None or PORT is None):
 	print("Error in retrieving in enviroment variables")
 	exit(1)
@@ -205,13 +207,14 @@ class MyChargePoint(cp):
 			}]).execute()
 		return transaction_id
 
+	#checks if a user has any active transactions
 	def has_active_transaction(self, user_data):
 		user_id = user_data['id']
-		session_data = supabase.table('sessions').select('end_time').eq('id', user_id).is_('end_time', None).execute().data
-		if session_data is None:
+		session_data = supabase.table('sessions').select('end_time').eq('user_id', user_id).is_('end_time', None).execute().data
+		if len(session_data) == 0:
 			return False
 		return True
-
+	
 
 
 
