@@ -130,7 +130,7 @@ class MyChargePoint(cp):
 		point_data, user_data = self.get_charge_point_and_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
-		if not point_data or kwargs['id_tag'] != self.authorized_users.queue[0] or point_data['status'] != 'Available':
+		if not point_data or kwargs['id_tag'] != self.authorized_users.queue[0] or point_data['status'] != 'Available' or self.has_active_transaction(user_data):
 			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
 		
 		#check for transaction if it's already active and return current transaction code
@@ -205,6 +205,12 @@ class MyChargePoint(cp):
 			}]).execute()
 		return transaction_id
 
+	def has_active_transaction(self, user_data):
+		user_id = user_data['id']
+		session_data = supabase.table('sessions').select('end_time').eq('id', user_id).is_('end_time', None).execute().data
+		if session_data is None:
+			return False
+		return True
 
 
 
