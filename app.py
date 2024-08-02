@@ -432,7 +432,7 @@ async def on_connect(websocket, path):
 		except Exception as e:
 			print(f"Error in connection: {e}")
 	else:
-		if connected_charge_points[charge_point_id] != None:
+		if charge_point_id not in connected_charge_points.keys:
 			cp = MyChargePoint(charge_point_id, websocket)
 			connected_charge_points[charge_point_id] = cp
 			logging.info("New connection established: %s", charge_point_id)
