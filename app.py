@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 import os
 import logging
+from queue import Queue
 
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cp
@@ -40,7 +41,7 @@ class MyChargePoint(cp):
 	"""
 	def __init__(self, id, connection):
 		super().__init__(id, connection)
-		self.authorized_users = set()
+		self.authorized_users = Queue()
 		self.transactions_users = set()
 		self.price_per_kwh = 0.15
 		self.meter_start = 0
@@ -94,7 +95,7 @@ class MyChargePoint(cp):
 		if user_data and not(id_token in self.transactions_users):
 			#if token haven't expired
 			if (datetime.now() < datetime.fromisoformat(user_data['expiry_date'])):
-				self.authorized_users.add(id_token) #add the user to list of authenticated for quicker access
+				self.authorized_users.put(id_token) #add the user to list of authenticated for quicker access
 				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now().isoformat()}
 			#exists but expired
 			else:
@@ -113,7 +114,7 @@ class MyChargePoint(cp):
 
 	#remove the expired users from data and their related transaction
 	def	remove_expired_user(self, id_tag):
-		self.authorized_users.discard(id_tag)
+		self.authorized_users.get()
 		self.transactions_users.discard(id_tag)
 
 
@@ -129,7 +130,7 @@ class MyChargePoint(cp):
 		point_data, user_data = self.get_charge_point_and_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
-		if not point_data or kwargs['id_tag'] not in self.authorized_users or point_data['status'] != 'Available':
+		if not point_data or kwargs['id_tag'] != self.authorized_users[0] or point_data['status'] != 'Available':
 			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
 		
 		#check for transaction if it's already active and return current transaction code
