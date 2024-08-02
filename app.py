@@ -130,7 +130,7 @@ class MyChargePoint(cp):
 		point_data, user_data = self.get_charge_point_and_user_data(connector_id, kwargs['id_tag'])
 
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
-		if not point_data or kwargs['id_tag'] != self.authorized_users[0] or point_data['status'] != 'Available':
+		if not point_data or kwargs['id_tag'] != self.authorized_users.queue[0] or point_data['status'] != 'Available':
 			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
 		
 		#check for transaction if it's already active and return current transaction code
@@ -432,9 +432,13 @@ async def on_connect(websocket, path):
 		except Exception as e:
 			print(f"Error in connection: {e}")
 	else:
-		cp = MyChargePoint(charge_point_id, websocket)
-		connected_charge_points[charge_point_id] = cp
-		logging.info("New connection established: %s", charge_point_id)
+		if connected_charge_points[charge_point_id] != None:
+			cp = MyChargePoint(charge_point_id, websocket)
+			connected_charge_points[charge_point_id] = cp
+			logging.info("New connection established: %s", charge_point_id)
+		else:
+			logging.info("Chargepoint: %s is already being used", charge_point_id)
+			return
 		try:
 			await cp.start()
 		except websockets.exceptions.ConnectionClosedError as e:
