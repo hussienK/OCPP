@@ -211,7 +211,7 @@ class MyChargePoint(cp):
 	def has_active_transaction(self, user_data, point_data):
 		user_id = user_data['id']
 		point_id = point_data['id']
-		session_data = supabase.table('sessions').select('end_time').eq('user_id', user_id).neq('charge_point_id', point_data).is_('end_time', None).execute().data
+		session_data = supabase.table('sessions').select('end_time').eq('user_id', user_id).neq('charge_point_id', point_id).is_('end_time', None).execute().data
 		if len(session_data) == 0:
 			return False
 		return True
