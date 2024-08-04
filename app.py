@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 import logging
@@ -98,7 +98,7 @@ class MyChargePoint(cp):
 			#if token haven't expired
 			if (datetime.now() < datetime.fromisoformat(user_data['expiry_date'])):
 				self.authorized_users.put(id_token) #add the user to list of authenticated for quicker access
-				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now().isoformat()}
+				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now(timezone.utc).isoformat()}
 			#exists but expired
 			else:
 				self.remove_expired_user(id_token)
@@ -134,7 +134,7 @@ class MyChargePoint(cp):
 		#if charger doesn't exit, or user not authenticated, or charge_point not available then request is blocked
 		if not point_data or kwargs['id_tag'] != self.authorized_users.queue[0] or point_data['status'] != 'Available':
 			return self.start_transaction_responce(0, AuthorizationStatus.blocked)
-		
+
 		#check for transaction if it's already active and return current transaction code
 		if kwargs['id_tag'] in self.transactions_users or self.has_active_transaction(user_data, point_data):
 			return self.concurrent_transaction_responce(kwargs['id_tag'])
@@ -278,7 +278,7 @@ class MyChargePoint(cp):
 			await self.on_stop_transaction_meter(**kwargs)
 
 		return call_result.MeterValues()
-	
+
 
 
 
