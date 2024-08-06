@@ -414,9 +414,7 @@ async def stop_remote_transaction(data) -> json:
 		cp = connected_charge_points[charge_point_id]
 		response = None
 		try:
-			print_spaced("HERE")
 			response = await send_remote_stop_transaction(cp, transaction_id)
-			print_spaced("BEFORE")
 		except Exception as e:
 			return json.dumps({'error': str(e)})
 
@@ -441,7 +439,6 @@ async def ws(id):
 		await cp.handle_message()
 	else:
 		cp = connected_charge_points[charge_point_id]
-		message = await websocket.receive()
 		print(f"Chargepoint: recieved action")
 		await cp.handle_message()
 
