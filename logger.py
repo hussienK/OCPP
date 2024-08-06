@@ -16,3 +16,4 @@ def create_logger():
 	logger.setLevel(logging.INFO)
 	logger.handlers.clear()  # Remove any existing handlers
 	logger.addHandler(handler)
+	logging.getLogger('hypercorn.access').disabled = True

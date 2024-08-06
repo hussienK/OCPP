@@ -10,20 +10,22 @@ from ocpp.v16.enums import Action, RegistrationStatus, AuthorizationStatus
 from ocpp.v16 import call_result, call
 
 from supabase import create_client, Client
+from quart import Quart, request, jsonify, websocket
 
 import asyncio
-from hypercorn.asyncio import serve
-from hypercorn.config import Config
-import websockets
+#import websockets
 
 from utils import *
 from logger import create_logger
 
 
 #load env variables
-DB_URL = os.getenv("DB_URL")
-DB_API = os.getenv("DB_API")
-PORT = int(os.getenv("PORT"))
+# DB_URL = os.getenv("DB_URL")
+# DB_API = os.getenv("DB_API")
+# PORT = int(os.getenv("PORT"))
+PORT = 9000
+DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
+DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
 supabase: Client = create_client(DB_URL, DB_API)
 
 if (DB_API is None or DB_URL is None or PORT is None):
@@ -49,10 +51,14 @@ class MyChargePoint(cp):
 		self.meter_start = 0
 		self.target_kwh = -1
 		self.charged_kwh = 0
-
-
-
-
+		self.ws = connection
+		
+	async def handle_message(self):
+		while True:
+			message = await self.ws.receive()  # Receive a single message asynchronously
+			if message == None:
+				break
+			await self.route_message(message)
 
 	"""
 		BootNotifcation handler
@@ -96,7 +102,7 @@ class MyChargePoint(cp):
 
 		if user_data and not(id_token in self.transactions_users):
 			#if token haven't expired
-			if (datetime.now() < datetime.fromisoformat(user_data['expiry_date'])):
+			if (datetime.now() < datetime.fromisoformat(user_data[0]['expiry_date'])):
 				self.authorized_users.put(id_token) #add the user to list of authenticated for quicker access
 				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now(timezone.utc).isoformat()}
 			#exists but expired
@@ -112,7 +118,7 @@ class MyChargePoint(cp):
 	#get data of current user from database
 	def	get_user_data(self, id_tag):
 		query_result = supabase.table('users').select('id', 'expiry_date').eq('id_tag', id_tag).execute()
-		return query_result.data[0]
+		return query_result.data
 
 	#remove the expired users from data and their related transaction
 	def	remove_expired_user(self, id_tag):
@@ -297,7 +303,7 @@ class MyChargePoint(cp):
 		if (len(self.transactions_users) != 0):
 			for t in self.transactions_users:
 				sessions = supabase.table('sessions').select('id', 'user_id', 'charge_point_id', 'end_time').is_('end_time', None).eq('user_id',
-			 			supabase.table('users').select('id', 'id_tag').eq('id_tag', t).execute().data[0]['id']).execute().data
+						 supabase.table('users').select('id', 'id_tag').eq('id_tag', t).execute().data[0]['id']).execute().data
 				charge_point = supabase.table('charge_points').select('id', 'meter_reading').eq('id', sessions[0]['charge_point_id']).execute().data
 				transaction = supabase.table('transactions').select('id', 'session_id').eq('session_id', sessions[0]['id']).execute().data
 				await self.close_transaction(transaction[0]['id'], t, charge_point[0]['meter_reading'])
@@ -362,18 +368,19 @@ async def send_remote_stop_transaction(cp, transaction_id):
 	request = call.RemoteStopTransaction(transaction_id=transaction_id)
 	response = await cp.call(request)
 	return response
-
+ 
 """
 	manages the requests for remote  transactions
 """
 #starts the remote transactions
-async def start_remote_transaction(data):
-	charge_point_id = data['data'].get('charge_point_id')
-	id_tag = data['data'].get('id_tag')
-	amount_kwh = data['data'].get('amount_kwh')
+async def start_remote_transaction(data) -> json:
+	charge_point_id = data.get('charge_point_id')
+	id_tag = data.get('id_tag')
+	amount_kwh = data.get('amount_kwh')
 
 	if not charge_point_id or not id_tag:
 		return json.dumps({'error': 'Missing charge_point_id or id_tag'})
+
 
 	if charge_point_id in connected_charge_points:
 		cp = connected_charge_points[charge_point_id]
@@ -382,11 +389,7 @@ async def start_remote_transaction(data):
 		connector_id = data.get('connector_id')
 		response = None
 		try:
-			if connector_id is not None:
-				connector_id = int(connector_id)
-			else:
-				connector_id = 1
-
+			connector_id = 1
 			response = await send_remote_start_transaction(cp, id_tag, connector_id, amount_kwh)
 		except Exception as e:
 			return json.dumps({'error': str(e)})
@@ -400,9 +403,9 @@ async def start_remote_transaction(data):
 		return json.dumps({'error': 'Charge point not connected'})
 
 #stops the remote transactions
-async def stop_remote_transaction(data):
-	charge_point_id = data['data'].get('charge_point_id')
-	transaction_id = data['data'].get('transaction_id')
+async def stop_remote_transaction(data) -> json:
+	charge_point_id = data.get('charge_point_id')
+	transaction_id = data.get('transaction_id')
 
 	if not charge_point_id or not transaction_id:
 		return json.dumps({'error': 'Missing charge_point_id or transaction_id'})
@@ -411,7 +414,9 @@ async def stop_remote_transaction(data):
 		cp = connected_charge_points[charge_point_id]
 		response = None
 		try:
-			response = await (send_remote_stop_transaction(cp, transaction_id))
+			print_spaced("HERE")
+			response = await send_remote_stop_transaction(cp, transaction_id)
+			print_spaced("BEFORE")
 		except Exception as e:
 			return json.dumps({'error': str(e)})
 
@@ -422,57 +427,74 @@ async def stop_remote_transaction(data):
 		return json.dumps(response_dict)
 	else:
 		return json.dumps({'error': 'Charge point not connected'})
+app = Quart(__name__)
 
-""" 
-	For every new charge point that connects, create a ChargePoint instance
-	and start listening for messages.
-"""
-async def on_connect(websocket, path):
-	charge_point_id = path.strip('/')
-	if not charge_point_id.startswith("CP"):
-		try:
-			message = await websocket.recv()
-			data = json.loads(message)
-			if (data['action'] == 'start_charging'):
-				response = await(start_remote_transaction(data))
-				await websocket.send(json.dumps(response))
-			elif (data['action'] == 'stop_charging'):
-				response = await(stop_remote_transaction(data))
-				await websocket.send(json.dumps(response))
-		except Exception as e:
-			print(f"Error in connection: {e}")
+@app.websocket('/ws/<id>')
+async def ws(id):
+	charge_point_id = id
+	print(f"MESSAGE RECIEVED WITH ID {charge_point_id}")
+	if charge_point_id not in connected_charge_points:
+		# Create a new MyChargePoint instance with the WebSocket object
+		cp = MyChargePoint(charge_point_id, websocket._get_current_object())
+		connected_charge_points[charge_point_id] = cp
+		print(f"New connection established: {charge_point_id}")
+		await cp.handle_message()
 	else:
-		if charge_point_id not in connected_charge_points.keys():
-			cp = MyChargePoint(charge_point_id, websocket)
-			connected_charge_points[charge_point_id] = cp
-			logging.info("New connection established: %s", charge_point_id)
-		else:
-			logging.info("Chargepoint: %s is already being used", charge_point_id)
-			return
-		try:
-			await cp.start()
-		except websockets.exceptions.ConnectionClosedError as e:
-			logging.error("Connection closed with error: %s", e)
-		finally:
-			await cp.on_disconnect(websocket)
+		cp = connected_charge_points[charge_point_id]
+		message = await websocket.receive()
+		print(f"Chargepoint: recieved action")
+		await cp.handle_message()
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+
+@app.route('/start_charging', methods=['POST'])
+async def start_charging():
+	data = await request.get_json()
+	charge_point_id = data.get('charge_point_id')
+	id_tag = data.get('id_tag')
+	amount_kwh = data.get('amount_kwh')
+
+	if not charge_point_id or not id_tag:
+		return jsonify({'error': 'Missing charge_point_id or id_tag'}), 400
+
+	try:
+		response = await start_remote_transaction({
+		    "charge_point_id": charge_point_id,
+		    "id_tag": id_tag,
+		    "amount_kwh": amount_kwh
+		})
+		return jsonify({"response": json.loads(response)})
+	except Exception as e:
+		logging.error(f"Error in /start_charging: {e}")
+		return jsonify({'error': str(e)}), 500
+
+@app.route('/stop_charging', methods=['POST'])
+async def stop_charging():
+	data = await request.get_json()
+	charge_point_id = data.get('charge_point_id')
+	transaction_id = data.get('transaction_id')
+
+	if not charge_point_id or not transaction_id:
+		return jsonify({'error': 'Missing charge_point_id or transaction_id'}), 400
+
+	try:
+		response = await stop_remote_transaction({
+			"charge_point_id": charge_point_id,
+			"transaction_id": transaction_id
+		})
+		return jsonify({"response": json.loads(response)})
+	except Exception as e:
+		logging.error(f"Error in /stop_charging: {e}")
+		return jsonify({'error': str(e)}), 500
+
+
+
+
 
 async def main():
 	create_logger()
-
-	# Start the WebSocket server
-	server = await websockets.serve(
-		on_connect,
-		'0.0.0.0',
-		PORT,
-		subprotocols=['ocpp1.6']
-	)
-
-	try:
-		await server.wait_closed(),
-	except asyncio.CancelledError:
-		print("Server is shutting down...")
-		server.close()
-		await server.wait_closed()
+	await app.run_task(host="localhost", port=PORT, debug=False)
 
 if __name__ == '__main__':
 	try:
