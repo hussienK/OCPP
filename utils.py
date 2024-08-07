@@ -4,9 +4,11 @@ import time
 import random
 
 def	print_spaced(a):
-	print('\n\n\n')
+	print("--------------------------------------------")
+	print('\n\n\n\n\n')
 	print(a)
-	print('\n\n\n')
+	print('\n\n\n\n\n')
+	print("--------------------------------------------")
 
 # User creation function
 def create_user(id_tag, name, expiry_duration_days):
@@ -37,6 +39,4 @@ def create_charge_point(location, status, manuf, firmware_version, meter_reading
 	return response
 
 def generate_transaction_id():
-	timestamp = int(time.time() * 1000)
-	random_numb = random.randint(1000, 9999)
-	return abs(timestamp - random_numb)
+	return random.randrange(1, 10000000)
