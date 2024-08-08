@@ -20,12 +20,9 @@ from logger import create_logger
 from ChargeSessionManagers import ChargeSessionManager, ChargeMeterManager
 
 #load env variables
-# DB_URL = os.getenv("DB_URL")
-# DB_API = os.getenv("DB_API")
-# PORT = int(os.getenv("PORT"))
-PORT = 9000
-DB_URL = "https://gjiuhpvnfbpjjjglgzib.supabase.co"
-DB_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqaXVocHZuZmJwampqZ2xnemliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjIwMDg5NDEsImV4cCI6MjAzNzU4NDk0MX0.B2CDr48yxglPKG6uEfAt9OPj2K-ZmqVHSeW6Bb_SW70"
+DB_URL = os.getenv("DB_URL")
+DB_API = os.getenv("DB_API")
+PORT = int(os.getenv("PORT"))
 supabase: Client = create_client(DB_URL, DB_API)
 
 if (DB_API is None or DB_URL is None or PORT is None):
