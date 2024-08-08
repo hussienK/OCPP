@@ -12,3 +12,5 @@ DONE:
 TODO:
 -transaction_id generation
 -deployment testing
+clickup
+add subprotocol

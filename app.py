@@ -6,7 +6,7 @@ from queue import Queue
 
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as cp
-from ocpp.v16.enums import Action, RegistrationStatus, AuthorizationStatus
+from ocpp.v16.enums import Action, RegistrationStatus, AuthorizationStatus, DataTransferStatus
 from ocpp.v16 import call_result, call
 
 from supabase import create_client, Client
@@ -51,7 +51,7 @@ class MyChargePoint(cp):
 		self.session_meters = dict()
 		self.id = id
 		self.ws = connection
-		
+
 	async def handle_message(self):
 		try:
 			while True:
@@ -78,7 +78,7 @@ class MyChargePoint(cp):
 			interval=60,
 			status=RegistrationStatus.accepted
 		)
-	
+
 
 
 
@@ -89,7 +89,7 @@ class MyChargePoint(cp):
 	@on(Action.DataTransfer)
 	async def on_data_transfer(self, **kwargs):
 		logging.info("Data transfer recieved")
-		return call_result.DataTransfer(RegistrationStatus.accepted)
+		return call_result.DataTransfer(call_result.DataTransferStatus.unknown_vendor_id)
 
 	"""
 		Send a heartbeat to check of server still connected
@@ -117,7 +117,7 @@ class MyChargePoint(cp):
 
 		if user_data and not(id_token in self.transactions_users):
 			#if token haven't expired
-			if (datetime.now() < datetime.fromisoformat(user_data[0]['expiry_date'])):
+			if (datetime.now(timezone.utc) < datetime.fromisoformat(user_data[0]['expiry_date'])):
 				self.authorized_users.add(id_token) #add the user to list of authenticated for quicker access
 				id_token_info = {'status': AuthorizationStatus.accepted, 'expiryDate': datetime.now(timezone.utc).isoformat()}
 			#exists but expired
@@ -287,7 +287,7 @@ class MyChargePoint(cp):
 		#update the table
 		supabase.table('charge_points').update({'status': kwargs['status']}).eq('connector_id', kwargs['connector_id']).eq('id', self.id).execute()
 		for session in self.sessions.items():
-			if kwargs['status'] in ['Charging', 'SuspendedEV', 'SuspendedEVE']:
+			if kwargs['status'] in ['Charging', 'SuspendedEV', 'SuspendedEVSE']:
 				if kwargs['status'] == 'Charging':
 					session[1].start_charging(kwargs['connector_id'])
 				else:

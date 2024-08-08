@@ -41,8 +41,4 @@ def create_charge_point(location, status, manuf, firmware_version, meter_reading
 	return response
 
 def generate_transaction_id():
-	global itemKeyCounter
-	itemKeyCounter += 1
-	timeMicroseconds = int(1000000 * datetime.now(datetime.timezone.utc).timestamp())
-	itemKey = f"{int(f'{timeMicroseconds}{itemKeyCounter%1000:03d}'):x}"    # at the current timestamp, hex code will be 16 chars long, no need to pad left with zeros
-	return itemKey
+	return random.randrange(1, 10000)
