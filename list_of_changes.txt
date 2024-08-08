@@ -1,7 +1,7 @@
 DONE:
 -changed the code to work with simulator
 -changed the code to use quart instead of flask
--added session timeout management using a clask
+-added session timeout management using
 -make authorization happen for multiple users at same time on same chargepoint (different connector)
 -make a way to keep track of transactions data for multiple operations in same chargePoint but different connectors
 -receive data at start
