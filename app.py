@@ -569,7 +569,7 @@ async def get_firmware_status_notification():
 
 async def main():
 	create_logger()
-	await app.run_task(host="localhost", port=PORT, debug=False)
+	await app.run_task(host="0.0.0.0", port=PORT, debug=False)
 
 if __name__ == '__main__':
 	try:
