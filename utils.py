@@ -1,7 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import Client, create_client
 import time
 import random
+
+itemKeyCounter = 0
 
 def	print_spaced(a):
 	print("--------------------------------------------")
@@ -39,4 +41,8 @@ def create_charge_point(location, status, manuf, firmware_version, meter_reading
 	return response
 
 def generate_transaction_id():
-	return random.randrange(1, 10000000)
+	global itemKeyCounter
+	itemKeyCounter += 1
+	timeMicroseconds = int(1000000 * datetime.now(datetime.timezone.utc).timestamp())
+	itemKey = f"{int(f'{timeMicroseconds}{itemKeyCounter%1000:03d}'):x}"    # at the current timestamp, hex code will be 16 chars long, no need to pad left with zeros
+	return itemKey

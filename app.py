@@ -53,11 +53,17 @@ class MyChargePoint(cp):
 		self.ws = connection
 		
 	async def handle_message(self):
-		while True:
-			message = await self.ws.receive()  # Receive a single message asynchronously
-			if message == None:
-				break
-			await self.route_message(message)
+		try:
+			while True:
+					message = await self.ws.receive()
+					if message == None:
+						break
+					await self.route_message(message)
+		except Exception as e:
+			logging.error(f"error in handle message {e}")
+		finally:
+			await self.on_disconnect(self.ws)
+		
 
 	"""
 		BootNotifcation handler
@@ -260,9 +266,9 @@ class MyChargePoint(cp):
 		#close transaction and update the meter
 		self.transactions_users.remove(kwargs['id_tag'])
 		await self.close_transaction(kwargs['transaction_id'], kwargs['id_tag'], kwargs['meter_stop'])
-		session = supabase.table('sessions').select('charge_point_id', "id").eq('id',
+		session = supabase.table('sessions').select('connector_id', "id").eq('id',
 			supabase.table('transactions').select('id', 'session_id').eq('id', kwargs['transaction_id']).execute().data[0]['session_id']).execute()
-		self.update_charge_point_meter(kwargs['meter_stop'], session.data[0]['charge_point_id'])
+		self.update_charge_point_meter(kwargs['meter_stop'], session.data[0]['connector_id'])
 		return self.stop_transaction_responce(AuthorizationStatus.accepted)
 	
 	def stop_transaction_responce(self, status):		
@@ -468,6 +474,8 @@ async def stop_remote_transaction(data) -> json:
 		return json.dumps(response_dict)
 	else:
 		return json.dumps({'error': 'Charge point not connected'})
+	
+
 app = Quart(__name__)
 
 @app.websocket('/ws/<id>')
@@ -531,10 +539,40 @@ async def stop_charging():
 
 
 
+"""
+	the central system is supposed to send diagnostics file to the spicified location
+"""
+@app.route('/get_diagnostics', methods=["POST"])
+async def get_diagnostics():
+	data = await request.get_json()
+	loc = data.get('location')
+	ret = data.get('retries')
+	ret_interval = data.get('retryInterval')
+	start_time = data.get('startTime')
+	stop_time = data.get('stopTime')
+
+	req = call.GetDiagnostics(
+		location=loc,
+		retries=ret,
+		retry_interval=ret_interval,
+		start_time=start_time,
+		stop_time=stop_time
+	)
+	response = await connected_charge_points['CP06'].call(req)
+	file_name = response.file_name
+	ans = jsonify({'fileName': file_name})
+	return ans
+
+@app.route('/firmware_status_notification', methods=["POST"])
+async def get_firmware_status_notification():
+	req = call.FirmwareStatusNotification()
+	response = await connected_charge_points['CP06'].call(req)
+	ans = jsonify({'status': response.status})
+	return ans
 
 async def main():
 	create_logger()
-	await app.run_task(host="0.0.0.0", port=PORT, debug=False)
+	await app.run_task(host="localhost", port=PORT, debug=False)
 
 if __name__ == '__main__':
 	try:
